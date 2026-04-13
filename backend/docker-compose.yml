@@ -1,0 +1,33 @@
+services:
+  backend:
+    build: ./src
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app
+    env_file:
+      - .env
+    environment:
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    ports:
+      - "8001:8000"           # Accesible desde el host en :8001
+    volumes:
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  chroma_data:               # Persistencia de ChromaDB entre reinicios

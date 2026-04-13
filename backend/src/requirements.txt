@@ -1,0 +1,25 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+python-dotenv==1.0.1
+pydantic==2.10.2
+pydantic-settings==2.6.1
+
+# PDF parsing
+pypdf==5.1.0
+
+# LangChain ecosystem
+langchain==0.3.7
+langchain-community==0.3.7
+langchain-groq==0.2.1
+langchain-huggingface==0.1.2
+langchain-chroma==0.1.4
+
+# LangGraph
+langgraph==0.2.45
+
+# Vector DB — 0.5.23 es la última versión compatible con langchain-chroma 0.1.4
+chromadb==0.5.23
+
+# Embeddings (modelo local, sin costo)
+sentence-transformers==3.3.1
