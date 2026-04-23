@@ -110,7 +110,7 @@ async def ask_question(request: QuestionRequest):
     )
     
 @router.post(
-    "/register", status_code=status.HTTP_201_CREATED)
+    "/register", status_code=status.HTTP_201_CREATED, tags=["Usuarios"], summary="Registrar un nuevo usuario")
 async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
