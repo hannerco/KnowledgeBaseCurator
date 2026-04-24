@@ -13,7 +13,7 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
   children,
   title = "SchoolAI",
   loginLink = "/login",
-  showSidebar = true,
+  showSidebar = false,
 }) => {
   return (
     <div className="h-screen flex flex-col overflow-hidden">
