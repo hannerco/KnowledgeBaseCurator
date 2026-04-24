@@ -59,7 +59,11 @@ export default function LoginForm(){
     }
 
     return (
-        <AuthLayout>
+        <AuthLayout
+            headerText=""
+            linkText=""
+            loginLink="/register"
+        >
             Hola
         </AuthLayout>
     
