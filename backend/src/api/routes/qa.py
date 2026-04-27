@@ -52,7 +52,7 @@ async def ask_question(request: QuestionRequest):
         })
     except Exception as exc:
         logger.error("Error en /ask:\n%s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error al procesar la pregunta: {str(exc)}")
+        raise HTTPException(status_code=500, detail="Error interno al procesar la pregunta.")
 
     return AnswerResponse(
         question=request.question,
