@@ -7,6 +7,11 @@ backend para el flujo de ingestion y preguntas sobre documentos.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
+from db.sql.database import Base, engine
+from db.sql.models import User
+
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="RAG MVP",

@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # Retrieval
     RETRIEVER_K: int = 4
 
+    # JWT
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+
     class Config:
         # En local se leen valores desde .env; en Docker tambien pueden
         # inyectarse por variables de entorno del contenedor.
