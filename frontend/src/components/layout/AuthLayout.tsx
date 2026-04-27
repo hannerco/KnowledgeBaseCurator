@@ -7,6 +7,9 @@ interface AuthLayoutProps {
   title?: string;
   loginLink?: string;
   showSidebar?: boolean;
+  showSocialButtons?: boolean;
+  headerText?: string;
+  linkText?: string;
 }
 
 export const AuthLayout: React.FC<AuthLayoutProps> = ({
@@ -14,10 +17,13 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
   title = "SchoolAI",
   loginLink = "/login",
   showSidebar = false,
+  showSocialButtons = true,
+  headerText,
+  linkText,
 }) => {
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-      <AuthHeader title={title} loginLink={loginLink} />
+      <AuthHeader title={title} loginLink={loginLink} headerText={headerText} linkText={linkText} />
 
       <main className="flex flex-1 overflow-hidden">
         
