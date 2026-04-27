@@ -7,10 +7,16 @@ Este modulo concentra los endpoints publicos:
 
 import logging
 import traceback
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from rag.ingest import ingest_pdf
 from rag.graph import rag_chain
+from utils.security import hash_password
+from fastapi import status
+from db.sql.schemas import UserCreate
+from db.sql.database import get_db
+from sqlalchemy.orm import Session
+from db.sql.models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -102,3 +108,21 @@ async def ask_question(request: QuestionRequest):
         question=request.question,
         answer=result["answer"],
     )
+    
+@router.post(
+    "/register", status_code=status.HTTP_201_CREATED, tags=["Usuarios"], summary="Registrar un nuevo usuario")
+async def register_user(user: UserCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.email == user.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email ya registrado")
+    hashed_password = hash_password(user.password)
+    new_user = User(
+        name=user.name,
+        email=user.email,
+        password=hashed_password,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"message": "Usuario registrado exitosamente"}   
+    
