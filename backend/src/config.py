@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Groq
     GROQ_API_KEY: str
-    GROQ_MODEL: str = "llama-3.1-8b-instant"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     # ChromaDB
     CHROMA_HOST: str = "chromadb"
@@ -29,6 +29,11 @@ class Settings(BaseSettings):
 
     # Retrieval
     RETRIEVER_K: int = 4
+
+    # JWT
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     class Config:
         # En local se leen valores desde .env; en Docker tambien pueden

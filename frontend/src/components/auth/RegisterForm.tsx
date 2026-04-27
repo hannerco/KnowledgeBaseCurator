@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { LiaUniversitySolid } from "react-icons/lia";
 import { RiGraduationCapLine } from "react-icons/ri";
 import { AuthLayout } from "../layout/AuthLayout";
@@ -13,6 +14,10 @@ type RegisterFormData = {
   acceptTerms: boolean;
 };
 
+type RegisterFormProps = {
+  showAlternativeAuth?: boolean;
+};
+
 const INITIAL_FORM: RegisterFormData = {
   fullName: "",
   email: "",
@@ -21,8 +26,7 @@ const INITIAL_FORM: RegisterFormData = {
   acceptTerms: false,
 };
 
-export default function RegisterForm() {
-  const [form, setForm] = useState<RegisterFormData>(INITIAL_FORM);
+export default function RegisterForm({ showAlternativeAuth = false }: RegisterFormProps) {  const router = useRouter();  const [form, setForm] = useState<RegisterFormData>(INITIAL_FORM);
   const [errors, setErrors] = useState<Partial<Record<keyof RegisterFormData, string>>>({});
   const [statusMessage, setStatusMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -65,14 +69,14 @@ export default function RegisterForm() {
 
     setTimeout(() => {
       setLoading(false);
-      setStatusMessage("Validación completada. Aquí irá la integración con la API.");
+      router.push("/dashboard");
     }, 500);
   };
 
   return (
     <AuthLayout>
         
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md mb-12">
         <div className="text-center mb-4">
           <h1 className="text-2xl font-semibold text-blue-900 tracking-tight">
             Únete al SchoolAI
@@ -150,18 +154,22 @@ export default function RegisterForm() {
             </Button>
           </form>
 
-          <Divider text="O continuar con" />
+          {showAlternativeAuth && (
+            <div className="mt-4">
+              <Divider text="O continuar con" />
 
-          <div className="grid grid-cols-2 gap-3">
-            <button className="flex items-center justify-center gap-2 border border-gray-200 rounded-lg py-2 text-xs font-medium text-gray-600 bg-white hover:bg-indigo-950 hover:text-white active:scale-[0.98] transition-all duration-150">
-              <LiaUniversitySolid />
-              correo universitario
-            </button>
-            <button className="flex items-center justify-center gap-2 border border-gray-200 rounded-lg py-2 text-xs font-medium text-gray-600 bg-white hover:bg-indigo-950 hover:text-white active:scale-[0.98] transition-all duration-150">
-              <RiGraduationCapLine />
-              ID
-            </button>
-          </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button className="flex items-center justify-center gap-2 border border-gray-200 rounded-lg py-2 text-xs font-medium text-gray-600 bg-white hover:bg-indigo-950 hover:text-white active:scale-[0.98] transition-all duration-150">
+                  <LiaUniversitySolid />
+                  correo universitario
+                </button>
+                <button className="flex items-center justify-center gap-2 border border-gray-200 rounded-lg py-2 text-xs font-medium text-gray-600 bg-white hover:bg-indigo-950 hover:text-white active:scale-[0.98] transition-all duration-150">
+                  <RiGraduationCapLine />
+                  ID
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </AuthLayout>
