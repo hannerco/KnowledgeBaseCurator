@@ -27,7 +27,12 @@ backend/
     ├── main.py           ← FastAPI app
     ├── config.py         ← Configuración centralizada
     ├── api/
-    │   └── routes.py     ← Endpoints: /upload, /ask
+  │   └── routes/
+  │       ├── __init__.py   ← Agregador y política de protección JWT
+  │       ├── auth.py       ← /login, /me
+  │       ├── users.py      ← /register
+  │       ├── documents.py  ← /upload
+  │       └── qa.py         ← /ask
     ├── rag/
     │   ├── ingest.py     ← Parseo PDF → chunks → ChromaDB
     │   └── graph.py      ← Grafo LangGraph: retrieve → generate
@@ -107,6 +112,31 @@ Respuesta:
 }
 ```
 
+### Login y obtención de token JWT
+
+```bash
+curl -X POST http://localhost:8000/api/v1/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@mail.com", "password": "123456"}'
+```
+
+Respuesta:
+```json
+{
+  "access_token": "<jwt>",
+  "token_type": "bearer"
+}
+```
+
+### Consumir endpoint protegido con Bearer Token
+
+```bash
+curl -X POST http://localhost:8000/api/v1/ask \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "¿De qué trata el documento?"}'
+```
+
 ### Hacer una pregunta
 
 ```bash
@@ -180,6 +210,9 @@ Todas tienen valores por defecto excepto `GROQ_API_KEY`.
 | Variable | Por defecto | Descripción |
 |---|---|---|
 | `GROQ_API_KEY` | — | **Requerida.** API key de Groq |
+| `JWT_SECRET_KEY` | — | **Requerida.** Clave secreta para firmar/verificar JWT |
+| `JWT_ALGORITHM` | `HS256` | Algoritmo de firma JWT |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Minutos de vida del access token |
 | `GROQ_MODEL` | `llama-3.1-8b-instant` | Modelo de Groq a usar |
 | `CHROMA_HOST` | `chromadb` | Host del servicio ChromaDB |
 | `CHROMA_PORT` | `8000` | Puerto del servicio ChromaDB |
