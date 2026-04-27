@@ -50,16 +50,15 @@ def generate(state: RAGState) -> dict:
     """
     # Unifica los chunks recuperados en un solo bloque para el prompt.
     context_text = "\n\n---\n\n".join(state["context"])
+    print("Contexto recuperado para la pregunta:\n", context_text)  # Debug: muestra el contexto antes de generar la respuesta.
 
-    prompt = f"""Eres un asistente experto. Responde la pregunta basándote ÚNICAMENTE en el contexto proporcionado.
-Si la respuesta no se encuentra en el contexto, responde: "No encontré información suficiente en los documentos para responder esa pregunta."
+    prompt = f"""Eres un asistente experto. Responde la pregunta basándote ÚNICAMENTE en el los datos proporcionados en el contexto el cual te pasaré a continuación.
+    Si no encuentras una respuesta clara en el contexto, responde: "No encontré información suficiente en los documentos para responder esa pregunta."
 
 Contexto:
 {context_text}
 
-Pregunta: {state["question"]}
-
-Respuesta:"""
+Pregunta: {state["question"]}"""
 
     llm = ChatGroq(
         model=settings.GROQ_MODEL,

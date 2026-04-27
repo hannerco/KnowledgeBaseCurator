@@ -1,16 +1,10 @@
-"""Rutas HTTP del backend.
-
-Este modulo concentra los endpoints publicos:
-1) subir documentos PDF para indexarlos en ChromaDB,
-2) hacer preguntas para ejecutar el pipeline RAG.
-"""
-
 import logging
 import traceback
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from rag.ingest import ingest_pdf
 from rag.graph import rag_chain
+from db.chroma_client import get_vectorstore
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,7 +17,6 @@ class QuestionRequest(BaseModel):
     """Payload de entrada para preguntas al sistema RAG."""
 
     question: str
-
     model_config = {"json_schema_extra": {"example": {"question": "¿De qué trata el documento?"}}}
 
 
@@ -102,3 +95,55 @@ async def ask_question(request: QuestionRequest):
         question=request.question,
         answer=result["answer"],
     )
+
+
+@router.get(
+    "/documents",
+    summary="Listar documentos indexados en ChromaDB",
+    tags=["Debug"],
+)
+async def list_documents():
+    """
+    Muestra cuántos chunks hay por documento en la colección.
+    Útil para verificar qué PDFs están indexados.
+    """
+    try:
+        vs = get_vectorstore()
+        collection = vs._collection
+        result = collection.get(include=["metadatas"])
+
+        # Agrupar chunks por archivo de origen
+        sources: dict[str, int] = {}
+        for meta in result["metadatas"]:
+            source = meta.get("source", "desconocido")
+            sources[source] = sources.get(source, 0) + 1
+
+        return {
+            "total_chunks": len(result["metadatas"]),
+            "documents": [
+                {"filename": name, "chunks": count}
+                for name, count in sorted(sources.items())
+            ],
+        }
+    except Exception as e:
+        logger.error("Error en /documents:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete(
+    "/documents/{filename}",
+    summary="Eliminar un documento de ChromaDB",
+    tags=["Debug"],
+)
+async def delete_document(filename: str):
+    """
+    Elimina todos los chunks de un documento específico por nombre de archivo.
+    """
+    try:
+        vs = get_vectorstore()
+        collection = vs._collection
+        collection.delete(where={"source": filename})
+        return {"message": f"Documento '{filename}' eliminado correctamente."}
+    except Exception as e:
+        logger.error("Error en /documents DELETE:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
