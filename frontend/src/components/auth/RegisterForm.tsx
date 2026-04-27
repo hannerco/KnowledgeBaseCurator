@@ -4,14 +4,14 @@ import { useRouter } from "next/navigation";
 import { LiaUniversitySolid } from "react-icons/lia";
 import { RiGraduationCapLine } from "react-icons/ri";
 import { AuthLayout } from "../layout/AuthLayout";
-import { Input, Button, Alert, Checkbox, Divider } from "../ui";
+import { Input, Button, Alert, Divider } from "../ui";
+import { useRegister } from "@/src/hooks/useRegister";
 
 type RegisterFormData = {
   fullName: string;
   email: string;
   password: string;
   confirmPassword: string;
-  acceptTerms: boolean;
 };
 
 type RegisterFormProps = {
@@ -23,11 +23,16 @@ const INITIAL_FORM: RegisterFormData = {
   email: "",
   password: "",
   confirmPassword: "",
-  acceptTerms: false,
 };
 
-export default function RegisterForm({ showAlternativeAuth = false }: RegisterFormProps) {  const router = useRouter();  const [form, setForm] = useState<RegisterFormData>(INITIAL_FORM);
-  const [errors, setErrors] = useState<Partial<Record<keyof RegisterFormData, string>>>({});
+export default function RegisterForm({
+  showAlternativeAuth = false,
+}: RegisterFormProps) {
+  const router = useRouter();
+  const [form, setForm] = useState<RegisterFormData>(INITIAL_FORM);
+  const [errors, setErrors] = useState<
+    Partial<Record<keyof RegisterFormData, string>>
+  >({});
   const [statusMessage, setStatusMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -45,14 +50,16 @@ export default function RegisterForm({ showAlternativeAuth = false }: RegisterFo
     const newErrors: Partial<Record<keyof RegisterFormData, string>> = {};
 
     if (!form.fullName.trim()) newErrors.fullName = "El nombre es requerido.";
-    if (!form.email.includes("@")) newErrors.email = "Ingresa un correo válido.";
+    if (!form.email.includes("@"))
+      newErrors.email = "Ingresa un correo válido.";
     if (form.password.length < 6) newErrors.password = "Mínimo 6 caracteres.";
     if (form.password !== form.confirmPassword)
       newErrors.confirmPassword = "Las contraseñas no coinciden.";
-    if (!form.acceptTerms) newErrors.acceptTerms = "Debes aceptar los términos.";
 
     return newErrors;
   };
+
+  const { register, loading: authLoading, error: authError } = useRegister();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -67,15 +74,23 @@ export default function RegisterForm({ showAlternativeAuth = false }: RegisterFo
     setLoading(true);
     setStatusMessage("");
 
-    setTimeout(() => {
+    try {
+      const message = await register({
+        name: form.fullName,
+        email: form.email,
+        password: form.password,
+      });
+      setStatusMessage(message);
+      router.push("/login");
+    } catch (error) {
+      setStatusMessage("");
+    } finally {
       setLoading(false);
-      router.push("/dashboard");
-    }, 500);
+    }
   };
 
   return (
     <AuthLayout>
-        
       <div className="w-full max-w-md mb-12">
         <div className="text-center mb-4">
           <h1 className="text-2xl font-semibold text-blue-900 tracking-tight">
@@ -87,6 +102,7 @@ export default function RegisterForm({ showAlternativeAuth = false }: RegisterFo
         <div className="px-10 py-1">
           <form onSubmit={handleSubmit} className="space-y-3" noValidate>
             {statusMessage && <Alert message={statusMessage} type="success" />}
+            {authError && <Alert message={authError} type="error" />}
 
             <Input
               name="fullName"
@@ -129,28 +145,12 @@ export default function RegisterForm({ showAlternativeAuth = false }: RegisterFo
               />
             </div>
 
-            <Checkbox
-              name="acceptTerms"
-              checked={form.acceptTerms}
-              onChange={handleChange}
-              error={errors.acceptTerms ? "Debes aceptar los términos." : ""}
-              label={
-                <>
-                  Acepto los{" "}
-                  <a href="#" className="text-blue-900">
-                    Términos de Servicio
-                  </a>{" "}
-                  y la{" "}
-                  <a href="#" className="text-blue-900">
-                    Política de Investigación Ética
-                  </a>
-                  .
-                </>
-              }
-            />
-
-            <Button type="submit" isLoading={loading} variant="primary">
-              {loading ? "Validando datos..." : "Crear Cuenta"}
+            <Button
+              type="submit"
+              isLoading={loading || authLoading}
+              variant="primary"
+            >
+              {loading || authLoading ? "Validando datos..." : "Crear Cuenta"}
             </Button>
           </form>
 
