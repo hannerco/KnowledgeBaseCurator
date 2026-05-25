@@ -250,3 +250,25 @@ Ver usuarios:
 Y por ejemplo ver datos de una tabla:
 
 SELECT \* FROM users;
+
+## Configurar Langfuse
+
+1. Levanta los servidores
+
+2. Crear cuenta y proyecto
+
+Abrir http://localhost:3001 en el navegador
+Registrarse con cualquier email y contraseña
+Crear una organización (ej. KnowledgeBase)
+Crear un proyecto dentro de la organización (ej. rag-pipeline)
+
+3. Obtener las API Keys
+
+Dentro del proyecto ir a Settings → API Keys
+Hacer clic en Create new API key
+Copiar las dos llaves generadas:
+
+pk-lf-... → Public Key
+sk-lf-... → Secret Key
+
+Vuelva a desplegar el backend o vuelva a despliegar todo
