@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
+    # Langfuse — observabilidad local
+    # Las llaves se generan en http://localhost:3001 al primer arranque.
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "http://langfuse-server:3000"
+    LANGFUSE_ENABLED: bool = True
+
     class Config:
         # En local se leen valores desde .env; en Docker tambien pueden
         # inyectarse por variables de entorno del contenedor.

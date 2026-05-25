@@ -27,8 +27,8 @@ services:
         condition: service_healthy
       db:
         condition: service_started
-    restart: unless-stopped
-
+      langfuse-server:
+        condition: service_started
   chromadb:
     image: chromadb/chroma:0.5.23
     ports:
@@ -43,6 +43,36 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  langfuse-db:
+      image: postgres:15
+      restart: always
+      environment:
+        POSTGRES_USER: langfuse
+        POSTGRES_PASSWORD: langfuse
+        POSTGRES_DB: langfuse
+      volumes:
+        - langfuse_postgres:/var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U langfuse"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+  langfuse-server:
+      image: langfuse/langfuse:2
+      ports:
+        - "3001:3000"
+      depends_on:
+        langfuse-db:
+          condition: service_healthy
+      environment:
+        DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+        NEXTAUTH_SECRET: changeme_use_a_long_random_secret_here
+        SALT: changeme_use_a_random_salt_here
+        NEXTAUTH_URL: http://localhost:3001
+        TELEMETRY_ENABLED: "false"
+      restart: unless-stopped
+
   db:
     image: postgres:15
     restart: always
@@ -55,6 +85,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+
+
 volumes:
   chroma_data:
   postgres_data:
+  langfuse_postgres:
