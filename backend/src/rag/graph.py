@@ -40,6 +40,7 @@ import json
 import time
 from typing import Optional, TypedDict
 
+
 from langchain_core.messages import HumanMessage
 from langchain_groq import ChatGroq
 from langgraph.graph import END, StateGraph
@@ -84,16 +85,19 @@ TRUSTED_ACADEMIC_DOMAINS = [
 
 # ---------------------------------------------------------------------------
 # Estado del grafo
+# Cada nodo recibe este estado y retorna un dict con los campos que modifica.
 # ---------------------------------------------------------------------------
 class CurationSuggestion(TypedDict):
-    type: str
-    description: str
-    action: str
-    severity: str
-    base_reference: str
+    """Estructura de una sugerencia académica generada por el agente."""
+    type: str               # "redundancy" | "conflict" | "complement" | "no_support"
+    description: str        # Explicación en lenguaje natural
+    action: str             # Acción recomendada al curador
+    severity: str           # "low" | "medium" | "high"
+    base_reference: str     # Fragmento del libro base relacionado (puede ser vacío)s
 
 
 class RAGState(TypedDict):
+    """Estado compartido entre nodos del grafo RAG."""
     question: str
     base_context: list[str]         # Chunks recuperados de libros base
     user_context: list[str]         # Chunks recuperados de documentos del usuario
@@ -117,23 +121,27 @@ class RAGState(TypedDict):
 # ---------------------------------------------------------------------------
 def _build_intent_classifier_prompt(question: str) -> str:
     return f"""
-    Eres un clasificador de intencion para un sistema RAG academico.
+    Eres un clasificador de intención para un sistema RAG académico.
 
-    Debes clasificar el mensaje del usuario en UNA SOLA categoria:
+    Debes clasificar el mensaje del usuario en UNA SOLA categoría:
 
     - chat
-    -> conversacion casual, saludos, agradecimientos o charla general.
+    → conversación casual, saludos, agradecimientos o charla general.
 
     - qa
-    -> preguntas sobre contenido academico, libros o documentos.
-    -> incluye preguntas sobre documentos del usuario.
+    → preguntas sobre contenido académico, libros o documentos.
+    → incluye preguntas sobre documentos del usuario.
 
     - curate
-    -> solicitudes de analisis, comparacion, revision critica,
+    → solicitudes de análisis, comparación, revisión crítica,
     deteccion de inconsistencias, evaluacion o validacion academica.
 
     IMPORTANTE:
-    - Responde SOLO con una palabra: chat, qa o curate
+    - Responde SOLO con una palabra:
+    chat
+    qa
+    o
+    curate
 
     Mensaje del usuario:
     {question}
@@ -157,11 +165,27 @@ def detect_intent(question: str, trace=None) -> str:
         prompt = _build_intent_classifier_prompt(question)
         response = llm.invoke([HumanMessage(content=prompt)])
 
+        response = llm.invoke([
+            HumanMessage(content=prompt)
+        ])
+
         latency_ms = int((time.monotonic() - t0) * 1000)
         usage = response.response_metadata.get("token_usage", {})
 
-        intent = response.content.strip().lower().replace('"', "").replace(".", "")
-        if intent not in {MODE_CHAT, MODE_QA, MODE_CURATE}:
+        intent = (
+            response.content
+            .strip()
+            .lower()
+            .replace('"', "")
+            .replace(".", "")
+        )
+
+        valid_modes = {
+            MODE_CHAT,
+            MODE_QA,
+            MODE_CURATE,
+        }
+        if intent not in {valid_modes}:
             intent = MODE_QA
 
         logger.info(
@@ -191,14 +215,14 @@ def detect_intent(question: str, trace=None) -> str:
 
         return intent
 
-    except Exception as exc:
+    except Exception as e:
         latency_ms = int((time.monotonic() - t0) * 1000)
-        logger.error("intent_detection_error", error=str(exc), latency_ms=latency_ms)
+        logger.error("intent_detection_error", error=str(e), latency_ms=latency_ms)
         return MODE_QA
 
 
 # ---------------------------------------------------------------------------
-# Helpers de recuperacion
+# Helpers de recuperación
 # ---------------------------------------------------------------------------
 
 def _retrieve_by_type(question: str, document_type: str, k: int, user_id: int, target_files: list[str] = None) -> list[str]:
@@ -284,7 +308,7 @@ def _retrieve_by_type(question: str, document_type: str, k: int, user_id: int, t
 
 
 # ---------------------------------------------------------------------------
-# Nodo 1 — Recuperacion
+# Nodo 1 — Recuperación separada
 # ---------------------------------------------------------------------------
 def retrieve(state: RAGState) -> dict:
     """
@@ -515,17 +539,24 @@ def web_search(state: RAGState) -> dict:
 # ---------------------------------------------------------------------------
 # Nodo 3 — Análisis y detección de inconsistencias
 # ---------------------------------------------------------------------------
-def _build_analysis_prompt(question, base_context, user_context) -> str:
+def _build_analysis_prompt(question: str, base_context: list[str], user_context: list[str]) -> str:
+    """
+    Construye el prompt para que el LLM analice inconsistencias entre
+    el material del usuario y los libros base.
+ 
+    El LLM debe responder ÚNICAMENTE con un JSON válido siguiendo
+    la estructura de CurationSuggestion para cada hallazgo.
+    """
     base_text = "\n\n---\n\n".join(base_context) if base_context else "Sin contenido de libros base disponible."
     user_text = "\n\n---\n\n".join(user_context)
 
-    return f"""Eres un curador academico experto. Tu tarea es analizar un documento subido por un estudiante
+    return f"""Eres un curador académico experto. Tu tarea es analizar un documento subido por un estudiante
     y compararlo con el contenido oficial de los libros base del curso.
 
     Debes identificar:
     1. REDUNDANCIA: El documento repite contenido que ya existe en los libros base.
     2. CONFLICTO: El documento contradice o es inconsistente con los libros base (esto es lo mas importante).
-    3. COMPLEMENTO: El documento agrega informacion util que no esta en los libros base.
+    3. COMPLEMENTO: El documento agrega información útil que no está en los libros base.
     4. SIN_RESPALDO: El documento contiene afirmaciones que no tienen respaldo en los libros base.
 
     Tema consultado: {question}
@@ -536,20 +567,20 @@ def _build_analysis_prompt(question, base_context, user_context) -> str:
     === CONTENIDO DEL DOCUMENTO DEL USUARIO ===
     {user_text}
 
-    Responde UNICAMENTE con un JSON valido con esta estructura exacta, sin texto adicional, sin markdown:
+    Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto adicional, sin markdown:
     {{
     "suggestions": [
         {{
         "type": "conflict|redundancy|complement|no_support",
-        "description": "Explicacion clara de que encontraste",
-        "action": "Accion concreta recomendada al curador",
+        "description": "Explicación clara de qué encontraste",
+        "action": "Acción concreta recomendada al curador (aprobar, rechazar, revisar, fusionar)",
         "severity": "low|medium|high",
-        "base_reference": "Fragmento breve del libro base relacionado, o vacio si no aplica"
+        "base_reference": "Fragmento breve del libro base relacionado, o vacío si no aplica"
         }}
     ]
     }}
 
-    Si no encuentras ningun problema ni sugerencia relevante, retorna {{"suggestions": []}}.
+    Si no encuentras ningún problema ni sugerencia relevante, retorna {{"suggestions": []}}.
     """
 
 
@@ -569,6 +600,7 @@ def analyze(state: RAGState) -> dict:
     if not state.get("user_context"):
         return {"suggestions": [], "analysis_error": None}
 
+    # Validación: advertir si no hay libros base (el análisis será limitado).
     if not state.get("base_context"):
         print("[analyze] Advertencia: No hay contenido de libros base para comparar.")
         logger.warning("analyze_no_base_context")
@@ -987,7 +1019,7 @@ def _build_curate_prompt(
 
         El usuario hizo esta solicitud: "{question}"
 
-        Analiza si es CONVERSACIONAL (mejoras, consejos) o FORMAL (reporte, analisis completo).
+        Analiza si es una solicitud CONVERSACIONAL (mejoras, consejos, qué le falta) o FORMAL (reporte, analisis completo, inconsistencias).
 
         Si es CONVERSACIONAL:
         - Responde de forma directa y natural, como si fuera una conversación.
@@ -1126,7 +1158,10 @@ def generate(state: RAGState) -> dict:
                 temperature=0,
             )
 
-            response = llm.invoke([HumanMessage(content=prompt)])
+            response = llm.invoke([
+                HumanMessage(content=prompt)
+                ])
+            
             latency_ms = int((time.monotonic() - t0) * 1000)
             usage = response.response_metadata.get("token_usage", {})
 
@@ -1189,7 +1224,7 @@ def generate(state: RAGState) -> dict:
             flush_langfuse()
             return {"answer": f"Error al generar la respuesta: {exc}\nPor favor intenta nuevamente."}
 # ---------------------------------------------------------------------------
-# Router y construccion del grafo
+# Router: decide si se ejecuta analyze o no
 # ---------------------------------------------------------------------------
 def route_after_retrieve(state: RAGState) -> str:
     """
@@ -1256,11 +1291,13 @@ def build_rag_graph():
     en ChromaDB, y el router decide si pasar por analyze o ir directo a generate.
     """
     graph = StateGraph(RAGState)
+
     graph.add_node("retrieve", retrieve)
     graph.add_node("web_search", web_search)
     graph.add_node("analyze", analyze)
     graph.add_node("generate", generate)
     graph.set_entry_point("retrieve")
+    # Routing condicional después de retrieve
     graph.add_conditional_edges(
         "retrieve",
         route_after_retrieve,
@@ -1278,8 +1315,10 @@ def build_rag_graph():
             "generate": "generate",
         },
     )
+
     graph.add_edge("analyze", "generate")
     graph.add_edge("generate", END)
+
     return graph.compile()
 
 

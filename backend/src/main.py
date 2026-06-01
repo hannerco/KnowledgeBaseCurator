@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 from db.sql.database import init_db
+from db.sql.models import User
 
 
 init_db()
@@ -29,7 +30,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+# Todas las rutas del negocio quedan bajo /api/v1.
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Registra cada request HTTP con metodo, ruta, status y latencia."""

@@ -11,6 +11,7 @@ API para responder preguntas sobre documentos PDF usando Retrieval-Augmented Gen
 | Vector DB        | ChromaDB (contenedor)              |
 | LLM              | Groq (`llama-3.1-8b-instant`)      |
 | Embeddings       | `all-MiniLM-L6-v2` (local, gratis) |
+| Guardrails       | Validación manual (regex)          |
 | Contenedores     | Docker + Docker Compose            |
 
 ## Estructura del proyecto
@@ -27,17 +28,23 @@ backend/
     ├── main.py           ← FastAPI app
     ├── config.py         ← Configuración centralizada
     ├── api/
-  │   └── routes/
-  │       ├── __init__.py   ← Agregador y política de protección JWT
-  │       ├── auth.py       ← /login, /me
-  │       ├── users.py      ← /register
-  │       ├── documents.py  ← /upload
-  │       └── qa.py         ← /ask
+    │ └── routes/
+    │     ├── __init__.py   ← Agregador y política de protección JWT
+    │     ├── auth.py       ← /login, /me
+    │     ├── users.py      ← /register
+    │     ├── documents.py  ← /upload
+    │     └── qa.py         ← /ask
     ├── rag/
     │   ├── ingest.py     ← Parseo PDF → chunks → ChromaDB
     │   └── graph.py      ← Grafo LangGraph: retrieve → generate
+    │   ├── graph.py      ← Grafo LangGraph: retrieve → generate
+    │   └── guardrails.py ← Validación de input/output con Guardrails AI
     └── db/
-        └── chroma_client.py  ← Conexión a ChromaDB
+        ├── chroma_client.py  ← Conexión a ChromaDB
+        └── sql/
+            ├── database.py   ← Conexión a PostgreSQL
+            ├── models.py      ← Modelos SQLAlchemy
+            └── schemas.py    ← Pydantic schemas
 ```
 
 ## Setup inicial (una sola vez por integrante)
@@ -172,6 +179,53 @@ Respuesta:
 | `docker compose logs -f chromadb` | Ver logs de ChromaDB                               |
 
 > 💡 El código del backend tiene **hot-reload** activado. Al guardar un archivo `.py`, FastAPI se reinicia automáticamente sin necesidad de reconstruir la imagen.
+
+---
+
+## Guardrails
+
+El sistema usa **validación manual** para validar tanto los inputs del usuario como los outputs del modelo, asegurando que el contenido sea seguro y relevante.
+
+### Cómo funcionan
+
+1. **Validación de input:** Antes de procesar una pregunta, se valida que:
+   - No esté vacía
+   - No supere los 2000 caracteres
+   - No contenga lenguaje obsceno
+   - Sea relevante al propósito académico
+
+2. **Validación de output:** Después de generar una respuesta, se valida que:
+   - No esté vacía
+   - No supere los 10000 caracteres
+   - No contenga lenguaje obsceno
+   - No contenga instrucciones para actividades ilegales
+   - No contenga contenido de odio
+   - Sea una respuesta coherente
+
+### Configuración
+
+Las reglas de validación están en `backend/src/rag/guardrails.py`. Para modificar las listas de palabras prohibidas o frases peligrosas, edita las constantes:
+
+- `PROFANITY_WORDS` — Lenguaje obsceno
+- `ILLEGAL_PHRASES` — Instrucciones para actividades ilegales
+- `HATE_SPEECH_WORDS` — Contenido de odio
+- `ACADEMIC_KEYWORDS` — Palabras clave académicas para validar relevancia
+
+### Comportamiento en caso de rechazo
+
+- **Input rechazado:** El usuario recibe un mensaje explicativo y la pregunta no se procesa
+- **Output rechazado:** El usuario recibe un mensaje de error y se le pide reformular su pregunta
+
+### Logs
+
+Los eventos de guardrails se loggean en los logs del backend con el prefijo `[guardrails]`:
+
+```bash
+docker compose logs -f backend | grep guardrails
+```
+
+---
+
 
 ---
 
