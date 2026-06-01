@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # Grading
     GRADING_CONFIDENCE_THRESHOLD: float = 0.7
-
+    
     # Langfuse — observabilidad local
     # Las llaves se generan en http://localhost:3001 al primer arranque.
     LANGFUSE_PUBLIC_KEY: str = ""
