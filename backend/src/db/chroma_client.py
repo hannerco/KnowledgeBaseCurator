@@ -30,10 +30,14 @@ def get_vectorstore() -> Chroma:
     Retorna un vectorstore de LangChain conectado al servicio ChromaDB via HTTP.
     Usar esta función siempre que se necesite leer o escribir en ChromaDB.
     """
-    # Cliente HTTP hacia el contenedor de ChromaDB definido en docker-compose.
+    # Cliente HTTP hacia ChromaDB (soporta local o Chroma Cloud).
     http_client = chromadb.HttpClient(
         host=settings.CHROMA_HOST,
         port=settings.CHROMA_PORT,
+        ssl=settings.CHROMA_SSL,
+        headers={"x-chroma-token": settings.CHROMA_API_KEY} if settings.CHROMA_API_KEY else {},
+        tenant=settings.CHROMA_TENANT,
+        database=settings.CHROMA_DATABASE,
     )
 
     # Coleccion logica donde se almacenan y consultan los embeddings.

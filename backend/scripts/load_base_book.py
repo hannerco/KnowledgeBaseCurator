@@ -43,6 +43,10 @@ def is_book_already_indexed(book: str) -> bool:
         http_client = chromadb.HttpClient(
             host=settings.CHROMA_HOST,
             port=settings.CHROMA_PORT,
+            ssl=settings.CHROMA_SSL,
+            headers={"x-chroma-token": settings.CHROMA_API_KEY} if settings.CHROMA_API_KEY else {},
+            tenant=settings.CHROMA_TENANT,
+            database=settings.CHROMA_DATABASE,
         )
         collection = http_client.get_collection(name=settings.COLLECTION_NAME)
 

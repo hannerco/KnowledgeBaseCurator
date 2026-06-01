@@ -8,7 +8,7 @@ import { useRegister } from "@/src/hooks/useRegister";
 type RegisterFormData = { fullName: string; email: string; password: string; confirmPassword: string };
 const INITIAL_FORM: RegisterFormData = { fullName: "", email: "", password: "", confirmPassword: "" };
 
-export default function RegisterForm({ showAlternativeAuth = false }: { showAlternativeAuth?: boolean }) {
+export default function RegisterForm() {
   const router  = useRouter();
   const [form, setForm]                     = useState<RegisterFormData>(INITIAL_FORM);
   const [errors, setErrors]                 = useState<Partial<Record<keyof RegisterFormData, string>>>({});

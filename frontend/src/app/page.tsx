@@ -1,8 +1,31 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { RiGraduationCapLine } from "react-icons/ri";
 import { SoftServeLogo } from "@/src/components/ui/SoftServeLogo";
+import { useAuthStore } from "@/src/store/auth.store";
 
 export default function Home() {
+  const router = useRouter();
+  const token = useAuthStore((state) => state.token);
+  const loadSession = useAuthStore((state) => state.loadSession);
+
+  useEffect(() => {
+    loadSession();
+  }, [loadSession]);
+
+  useEffect(() => {
+    if (token) {
+      router.push("/dashboard");
+    }
+  }, [token, router]);
+
+  if (token) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-[#f0f4ff] font-sans flex flex-col">
 
@@ -34,7 +57,7 @@ export default function Home() {
           </h1>
           <p className="text-gray-500 text-base md:text-lg leading-relaxed max-w-md">
 
-            Agente digital de apoyo docente que sintetiza conocimiento y potencia la enseñanza 
+            Agente digital de apoyo docente que sintetiza conocimiento y potencia la enseñanza
             a través de IA generativa de alta precisión.
           </p>
           <div className="flex flex-col sm:flex-row items-center gap-3 mt-1 w-full sm:w-auto">

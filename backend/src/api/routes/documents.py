@@ -44,7 +44,7 @@ async def upload_document(
 
     try:
         file_bytes = await file.read()
-        chunks_count = ingest_pdf(file_bytes, file.filename)
+        chunks_count = ingest_pdf(file_bytes, file.filename, user_id=current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -56,6 +56,7 @@ async def upload_document(
         user_id=current_user.id,
         filename=file.filename,
         chunks_indexed=chunks_count,
+        document_type="user_upload"
     )
     db.add(db_document)
     db.commit()
@@ -65,6 +66,55 @@ async def upload_document(
         filename=file.filename,
         chunks_indexed=chunks_count,
         message=f"'{file.filename}' indexado correctamente en {chunks_count} fragmentos.",
+    )
+
+
+@router.post(
+    "/upload/base",
+    response_model=UploadResponse,
+    summary="Subir e indexar un PDF como fuente de verdad (base_knowledge)",
+)
+async def upload_base_document(
+    file: UploadFile = File(...),
+    knowledge_base: str = "general",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Valida, parsea e indexa un PDF como base de conocimiento."""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF (.pdf)")
+
+    try:
+        file_bytes = await file.read()
+        chunks_count = ingest_pdf(
+            file_bytes, 
+            file.filename, 
+            document_type="base_knowledge", 
+            knowledge_base=knowledge_base, 
+            book=file.filename,
+            user_id=current_user.id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error en /upload/base:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Error al procesar el archivo.")
+
+    # Persist document record in PostgreSQL
+    db_document = Document(
+        user_id=current_user.id,
+        filename=file.filename,
+        chunks_indexed=chunks_count,
+        document_type="base_knowledge"
+    )
+    db.add(db_document)
+    db.commit()
+    db.refresh(db_document)
+
+    return UploadResponse(
+        filename=file.filename,
+        chunks_indexed=chunks_count,
+        message=f"'{file.filename}' indexado como base de verdad correctamente en {chunks_count} fragmentos.",
     )
 
 
@@ -80,6 +130,51 @@ async def list_documents(
     """Retorna los documentos del usuario desde PostgreSQL."""
     documents = db.query(Document).filter(Document.user_id == current_user.id).all()
     return documents
+
+
+@router.get(
+    "/documents/base",
+    summary="Listar todas las fuentes de verdad (base_knowledge)",
+)
+async def list_base_documents(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retorna la lista de archivos globales consultando directamente a ChromaDB.
+    Esto garantiza que se muestren tanto los subidos por API como los cargados por script.
+    """
+    try:
+        vs = get_vectorstore()
+        collection = vs._collection
+        result = collection.get(
+            where={
+                "$and": [
+                    {"document_type": "base_knowledge"},
+                    {"user_id": current_user.id}
+                ]
+            },
+            include=["metadatas"]
+        )
+
+        sources: dict[str, dict] = {}
+        for meta in result["metadatas"]:
+            if not meta: continue
+            source = meta.get("source", "desconocido")
+            if source not in sources:
+                sources[source] = {
+                    "id": source, # Usamos el nombre como ID único temporal
+                    "filename": source,
+                    "chunks_indexed": 1,
+                    "document_type": "base_knowledge",
+                    "scope": "global"
+                }
+            else:
+                sources[source]["chunks_indexed"] += 1
+
+        return list(sources.values())
+    except Exception:
+        logger.error("Error en /documents/base:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Error al consultar libros base en ChromaDB.")
 
 
 @router.delete(

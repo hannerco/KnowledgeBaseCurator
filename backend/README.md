@@ -251,6 +251,9 @@ Y por ejemplo ver datos de una tabla:
 
 SELECT \* FROM users;
 
+## para usar la tavily create una ApiKey en https://tavily.com/ y agregala al .env
+>>>>>>> 368d62f965a8bd69493866a99ef9e5323948e48f
+
 ## Configurar Langfuse
 
 1. Levanta los servidores

@@ -5,6 +5,7 @@ import {
   FiClock, FiFile, FiSettings, FiHelpCircle, FiLogOut,
   FiEdit2, FiTrash2, FiHome,
 } from "react-icons/fi";
+import { RiFileList2Line } from "react-icons/ri";
 import { AiOutlineFolderAdd } from "react-icons/ai";
 import { IoAddOutline } from "react-icons/io5";
 import { GoSidebarCollapse, GoSidebarExpand } from "react-icons/go";
@@ -16,7 +17,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { LogoutModal } from "./LogoutModal";
 import { useState, useRef, useEffect } from "react";
 import { apiDeleteChat, apiUpdateChat } from "@/src/services/chat.service";
-import { SoftServeLogo } from "@/src/components/ui/SoftServeLogo";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -27,6 +27,7 @@ const NAV_ITEMS = [
   { name: "Inicio",        path: "/dashboard",               icon: FiHome,            iconSize: "h-4 w-4" },
   { name: "Historial",     path: "/dashboard/historial",     icon: FiClock,           iconSize: "h-4 w-4" },
   { name: "Subir archivo", path: "/dashboard/subir-archivo", icon: AiOutlineFolderAdd,iconSize: "h-4 w-4" },
+  { name: "Examenes",      path: "/dashboard/examenes",      icon: RiFileList2Line,   iconSize: "h-4 w-4" },
 ];
 const NAV_BOTTOM = [
   { name: "Configuración",   path: "/dashboard/configuracion", icon: FiSettings,   iconSize: "h-4 w-4" },

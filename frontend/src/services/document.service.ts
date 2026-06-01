@@ -1,37 +1,30 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+import { API_BASE_URL } from "../lib/api";
 
-export interface GlobalDocument {
+export interface DocumentResponse {
   id: number;
+  user_id: number;
   filename: string;
   chunks_indexed: number;
-  description?: string;
+  description: string | null;
+  document_type: string;
   uploaded_at: string;
-  size_bytes?: number;
+}
+
+export interface UploadResponse {
+  filename: string;
+  chunks_indexed: number;
+  message: string;
+}
+
+export interface GlobalDocument {
+  id: string;
+  filename: string;
+  chunks_indexed: number;
   scope: "global";
 }
 
-export interface LocalDocument {
-  id: number;
-  filename: string;
-  chunks_indexed: number;
-  description?: string;
-  uploaded_at: string;
-  size_bytes?: number;
-  chat_id: number;
-  scope: "local";
-}
-
-export type AnyDocument = GlobalDocument | LocalDocument;
-
 function authHeaders(token: string) {
   return { Authorization: `Bearer ${token}` };
-}
-
-function authJsonHeaders(token: string) {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  };
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -42,8 +35,41 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function apiGetGlobalDocuments(token: string): Promise<GlobalDocument[]> {
+export async function apiGetUserDocuments(token: string): Promise<DocumentResponse[]> {
   const res = await fetch(`${API_BASE_URL}/documents/`, {
+    headers: authHeaders(token),
+  });
+  return handleResponse<DocumentResponse[]>(res);
+}
+
+export async function apiUploadUserDocument(
+  token: string,
+  file: File
+): Promise<UploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_BASE_URL}/upload`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: formData,
+  });
+  return handleResponse<UploadResponse>(res);
+}
+
+export async function apiDeleteDocument(token: string, documentId: number): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/documents/${documentId}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail ?? `Error ${res.status}`);
+  }
+}
+
+export async function apiGetGlobalDocuments(token: string): Promise<GlobalDocument[]> {
+  const res = await fetch(`${API_BASE_URL}/documents/base`, {
     headers: authHeaders(token),
   });
   return handleResponse<GlobalDocument[]>(res);
@@ -51,97 +77,15 @@ export async function apiGetGlobalDocuments(token: string): Promise<GlobalDocume
 
 export async function apiUploadGlobalDocument(
   token: string,
-  file: File,
-  description?: string
-): Promise<GlobalDocument> {
-  const formData = new FormData();
-  formData.append("file", file);
-  if (description) formData.append("description", description);
-
-  const res = await fetch(`${API_BASE_URL}/documents/upload`, {
-    method: "POST",
-    headers: authHeaders(token),
-    body: formData,
-  });
-  return handleResponse<GlobalDocument>(res);
-}
-
-export async function apiDeleteGlobalDocument(token: string, docId: number): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/documents/${docId}`, {
-    method: "DELETE",
-    headers: authHeaders(token),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail ?? `Error ${res.status}`);
-  }
-}
-
-export async function apiGetLocalDocuments(token: string, chatId: number): Promise<LocalDocument[]> {
-  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/documents/`, {
-    headers: authHeaders(token),
-  });
-  return handleResponse<LocalDocument[]>(res);
-}
-
-export async function apiUploadLocalDocument(
-  token: string,
-  chatId: number,
   file: File
-): Promise<LocalDocument> {
+): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/documents/upload`, {
+  const res = await fetch(`${API_BASE_URL}/upload/base`, {
     method: "POST",
     headers: authHeaders(token),
     body: formData,
   });
-  return handleResponse<LocalDocument>(res);
-}
-
-export async function apiDeleteLocalDocument(
-  token: string,
-  chatId: number,
-  docId: number
-): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/documents/${docId}`, {
-    method: "DELETE",
-    headers: authHeaders(token),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail ?? `Error ${res.status}`);
-  }
-}
-
-export interface ActiveSources {
-  global_doc_ids: number[];
-  local_doc_ids: number[];
-}
-
-export async function apiSetActiveSources(
-  token: string,
-  chatId: number,
-  sources: ActiveSources
-): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/sources`, {
-    method: "PUT",
-    headers: authJsonHeaders(token),
-    body: JSON.stringify(sources),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail ?? `Error ${res.status}`);
-  }
-}
-
-export async function apiGetActiveSources(
-  token: string,
-  chatId: number
-): Promise<ActiveSources> {
-  const res = await fetch(`${API_BASE_URL}/chats/${chatId}/sources`, {
-    headers: authHeaders(token),
-  });
-  return handleResponse<ActiveSources>(res);
+  return handleResponse<UploadResponse>(res);
 }

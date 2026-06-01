@@ -82,6 +82,7 @@ def parse_pdf(
     document_type: str = "user_upload",
     knowledge_base: Optional[str] = None,
     book: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> list[Document]:
     """
     Extrae texto por página y retorna documentos con metadatos académicos.
@@ -142,6 +143,9 @@ def parse_pdf(
             if book:
                 base_metadata["book"] = book
 
+        if user_id is not None:
+            base_metadata["user_id"] = user_id
+
         # Agregar metadata académica contextual (solo si se detectó algo)
         if current_context["chapter"]:
             base_metadata["chapter"] = current_context["chapter"]
@@ -186,6 +190,7 @@ def ingest_pdf(
     document_type: str = "user_upload",
     knowledge_base: Optional[str] = None,
     book: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> int:
     """
     Pipeline completo de ingestión:
@@ -211,6 +216,7 @@ def ingest_pdf(
         document_type,
         knowledge_base,
         book,
+        user_id,
     )
 
     if not page_documents:

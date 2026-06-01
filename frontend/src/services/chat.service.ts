@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+import { API_BASE_URL } from "../lib/api";
 
 export interface BackendChat {
   id: number;
@@ -83,12 +83,31 @@ export async function apiGetMessages(token: string, chatId: number): Promise<Bac
 export async function apiSendMessage(
   token: string,
   chatId: number,
-  content: string
+  content: string,
+  sources?: string[],
+  base_sources?: string[]
 ): Promise<MessagePairResponse> {
+  const body: {
+    content: string;
+    sender: string;
+    sources?: string[];
+    base_sources?: string[];
+  } = {
+    content,
+    sender: "user",
+  };
+
+  if (sources) {
+    body.sources = sources;
+  }
+  if (base_sources) {
+    body.base_sources = base_sources;
+  }
+
   const res = await fetch(`${API_BASE_URL}/chats/${chatId}/messages/`, {
     method: "POST",
     headers: authHeaders(token),
-    body: JSON.stringify({ content, sender: "user" }),
+    body: JSON.stringify(body),
   });
   return handleResponse<MessagePairResponse>(res);
 }

@@ -6,11 +6,15 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  sources?: {
+    localFilenames: string[];
+    globalIds: string[];
+  };
 }
 
 export interface Chat {
-  id: string;        // ID local (string)
-  backendId: number; // ID real en la BD
+  id: string;
+  backendId: number;
   title: string;
   createdAt: Date;
   updatedAt: Date;
@@ -53,7 +57,6 @@ export const useDashboardStore = create<DashboardState>()(
 
       setChats: (chats) =>
         set((state) => {
-          // Merge: keep existing messages for chats already in store
           const merged = chats.map((incoming) => {
             const existing = state.chats.find((c) => c.backendId === incoming.backendId);
             return existing && existing.messages.length > 0
@@ -131,8 +134,7 @@ export const useDashboardStore = create<DashboardState>()(
       },
     }),
     {
-      name: "schoolai-dashboard", // clave en localStorage
-      // Solo persistir chats y NO isAgentTyping (se resetea a false siempre)
+      name: "schoolai-dashboard",
       partialize: (state) => ({
         chats: state.chats,
         currentChat: state.currentChat,

@@ -6,7 +6,9 @@ export const useRegister = () => {
   const error = useAuthStore((state) => state.error);
 
   return {
-    register,
+    register: async (payload: { name: string; email: string; password: string }) => {
+      return register(payload);
+    },
     loading,
     error,
   };
