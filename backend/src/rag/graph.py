@@ -49,7 +49,6 @@ from loguru import logger
 from config import settings
 from db.chroma_client import get_vectorstore
 from observability.langfuse_client import create_trace, flush_langfuse
-from config import settings
 from rag.guardrails import validate_input, validate_output
 
  
