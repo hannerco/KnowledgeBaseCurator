@@ -165,10 +165,6 @@ def detect_intent(question: str, trace=None) -> str:
         prompt = _build_intent_classifier_prompt(question)
         response = llm.invoke([HumanMessage(content=prompt)])
 
-        response = llm.invoke([
-            HumanMessage(content=prompt)
-        ])
-
         latency_ms = int((time.monotonic() - t0) * 1000)
         usage = response.response_metadata.get("token_usage", {})
 
@@ -185,7 +181,7 @@ def detect_intent(question: str, trace=None) -> str:
             MODE_QA,
             MODE_CURATE,
         }
-        if intent not in {valid_modes}:
+        if intent not in valid_modes:
             intent = MODE_QA
 
         logger.info(
@@ -313,7 +309,7 @@ def _retrieve_by_type(question: str, document_type: str, k: int, user_id: int, t
 def retrieve(state: RAGState) -> dict:
     """
     Nodo 1 — Recuperación con validación de guardrails al inicio.
- 
+
     Orden de ejecución:
     1. Valida el input con guardrails ANTES de tocar ChromaDB o internet.
        Si falla → setea input_error y retorna con mode=MODE_CHAT para ir
@@ -321,22 +317,22 @@ def retrieve(state: RAGState) -> dict:
     2. Detecta intención (chat / qa / curate).
     3. Recupera chunks de ChromaDB con MMR y calcula rag_similarity_score.
     """
-
-    """Crea el trace raiz y el span de recuperacion."""
     t0 = time.monotonic()
     question = state["question"]
-    
+    avg_score = 0.0
+    base_chunks, user_chunks, mode = [], [], MODE_QA
+
     # ------------------------------------------------------------------
     # GUARDRAIL DE INPUT — primer filtro, antes de cualquier búsqueda
     # ------------------------------------------------------------------
     is_input_valid, _, input_error = validate_input(question)
- 
+
     if not is_input_valid:
-        print(f"[guardrails][retrieve] Input rechazado: {input_error}")
+        logger.warning("guardrails_input_rejected", error=input_error)
         return {
             "base_context": [],
             "user_context": [],
-            "mode": MODE_CHAT,          # Fuerza flujo directo a generate
+            "mode": MODE_CHAT,
             "suggestions": [],
             "analysis_error": None,
             "rag_similarity_score": 1.0,
@@ -344,9 +340,14 @@ def retrieve(state: RAGState) -> dict:
             "used_web_fallback": False,
             "input_error": input_error,
             "conversation_history": state.get("conversation_history", []),
+            "_trace_id": None,
         }
 
-    trace = create_trace(name="rag_pipeline", metadata={"question": question})
+    trace = create_trace(
+        name="rag_pipeline",
+        input={"question": question},
+        metadata={"question": question},
+    )
     trace_id = trace.id if trace else None
 
     with logger.contextualize(trace_id=trace_id or "-"):
@@ -372,6 +373,7 @@ def retrieve(state: RAGState) -> dict:
                     "used_web_fallback": False,
                     "input_error": None,
                     "conversation_history": state.get("conversation_history", []),
+                    "_trace_id": trace_id,
                 }
 
             # ---------------------------------------------------
@@ -393,8 +395,6 @@ def retrieve(state: RAGState) -> dict:
                 target_files=state.get("user_files", [])
             )
 
-            # Score final: promedio ponderado.
-            # Si no hay user_context usamos solo base_score.
             if user_chunks:
                 avg_score = (base_score + user_score) / 2
             else:
@@ -403,11 +403,8 @@ def retrieve(state: RAGState) -> dict:
             latency_ms = int((time.monotonic() - t0) * 1000)
 
             print(f"[retrieve] RAG similarity score: {avg_score:.3f} "
-                f"(umbral: {settings.WEB_SEARCH_SIMILARITY_THRESHOLD})")
-            
+                  f"(umbral: {settings.WEB_SEARCH_SIMILARITY_THRESHOLD})")
 
-
-            latency_ms = int((time.monotonic() - t0) * 1000)
             logger.info(
                 "retrieve_ok",
                 mode=mode,
@@ -421,6 +418,7 @@ def retrieve(state: RAGState) -> dict:
                     "mode": mode,
                     "base_chunks_count": len(base_chunks),
                     "user_chunks_count": len(user_chunks),
+                    "rag_similarity_score": avg_score,
                     "latency_ms": latency_ms,
                 })
 
@@ -429,7 +427,6 @@ def retrieve(state: RAGState) -> dict:
             logger.error("retrieve_error", error=str(exc), latency_ms=latency_ms)
             if span:
                 span.end(level="ERROR", status_message=str(exc))
-            base_chunks, user_chunks, mode = [], [], MODE_QA
 
     return {
         "base_context": base_chunks,
@@ -613,7 +610,7 @@ def analyze(state: RAGState) -> dict:
         from observability.langfuse_client import get_langfuse_client
         lf = get_langfuse_client()
         if lf and trace_id:
-            trace = lf.get_trace(trace_id)
+            trace = lf.trace(id=trace_id)
     except Exception:
         pass
 
@@ -1070,6 +1067,7 @@ def generate(state: RAGState) -> dict:
     Incorpora snippets web en el prompt cuando used_web_fallback=True,
     indicando la procedencia de cada fragmento.
     """
+    logger.info("generate_trace_id", trace_id=state.get("_trace_id"))
     t0 = time.monotonic()
     trace_id = state.get("_trace_id")
 
@@ -1078,7 +1076,7 @@ def generate(state: RAGState) -> dict:
         from observability.langfuse_client import get_langfuse_client
         lf = get_langfuse_client()
         if lf and trace_id:
-            trace = lf.get_trace(trace_id)
+            trace = lf.trace(id=trace_id)
     except Exception:
         pass
 

@@ -54,8 +54,7 @@ def get_langfuse_client():
         return None
 
 
-def create_trace(name: str, user_id: str = None, session_id: str = None, metadata: dict = None):
-    """Crea y retorna un trace de Langfuse, o None si no esta disponible."""
+def create_trace(name: str, user_id: str = None, session_id: str = None, input: dict = None, metadata: dict = None):
     lf = get_langfuse_client()
     if not lf:
         return None
@@ -64,6 +63,7 @@ def create_trace(name: str, user_id: str = None, session_id: str = None, metadat
             name=name,
             user_id=user_id,
             session_id=session_id,
+            input=input,
             metadata=metadata or {},
         )
     except Exception as exc:
@@ -72,11 +72,10 @@ def create_trace(name: str, user_id: str = None, session_id: str = None, metadat
         return None
 
 def flush_langfuse() -> None:
-    """Fuerza el envio de eventos pendientes antes de responder al cliente."""
     lf = get_langfuse_client()
     if not lf:
         return
     try:
-        lf.flush()
+        lf.flush(timeout=2)  # máximo 2 segundos
     except Exception as exc:
         logger.warning("langfuse_flush_failed", error=str(exc))
