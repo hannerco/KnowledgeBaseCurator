@@ -28,14 +28,15 @@ backend/
     ├── main.py           ← FastAPI app
     ├── config.py         ← Configuración centralizada
     ├── api/
-  │   └── routes/
-  │       ├── __init__.py   ← Agregador y política de protección JWT
-  │       ├── auth.py       ← /login, /me
-  │       ├── users.py      ← /register
-  │       ├── documents.py  ← /upload
-  │       └── qa.py         ← /ask
+    │ └── routes/
+    │     ├── __init__.py   ← Agregador y política de protección JWT
+    │     ├── auth.py       ← /login, /me
+    │     ├── users.py      ← /register
+    │     ├── documents.py  ← /upload
+    │     └── qa.py         ← /ask
     ├── rag/
     │   ├── ingest.py     ← Parseo PDF → chunks → ChromaDB
+    │   └── graph.py      ← Grafo LangGraph: retrieve → generate
     │   ├── graph.py      ← Grafo LangGraph: retrieve → generate
     │   └── guardrails.py ← Validación de input/output con Guardrails AI
     └── db/
@@ -225,6 +226,9 @@ docker compose logs -f backend | grep guardrails
 
 ---
 
+
+---
+
 ## Flujo del RAG
 
 ```
@@ -302,3 +306,26 @@ Y por ejemplo ver datos de una tabla:
 SELECT \* FROM users;
 
 ## para usar la tavily create una ApiKey en https://tavily.com/ y agregala al .env
+>>>>>>> 368d62f965a8bd69493866a99ef9e5323948e48f
+
+## Configurar Langfuse
+
+1. Levanta los servidores
+
+2. Crear cuenta y proyecto
+
+Abrir http://localhost:3001 en el navegador
+Registrarse con cualquier email y contraseña
+Crear una organización (ej. KnowledgeBase)
+Crear un proyecto dentro de la organización (ej. rag-pipeline)
+
+3. Obtener las API Keys
+
+Dentro del proyecto ir a Settings → API Keys
+Hacer clic en Create new API key
+Copiar las dos llaves generadas:
+
+pk-lf-... → Public Key
+sk-lf-... → Secret Key
+
+Vuelva a desplegar el backend o vuelva a despliegar todo

@@ -54,6 +54,13 @@ class Settings(BaseSettings):
 
     # Grading
     GRADING_CONFIDENCE_THRESHOLD: float = 0.7
+    
+    # Langfuse — observabilidad local
+    # Las llaves se generan en http://localhost:3001 al primer arranque.
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "http://langfuse-server:3000"
+    LANGFUSE_ENABLED: bool = True
 
     class Config:
         # En local se leen valores desde .env; en Docker tambien pueden

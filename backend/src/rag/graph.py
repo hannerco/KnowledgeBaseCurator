@@ -37,12 +37,18 @@ Flujo Curación con fallback web:
 
  
 import json
-from typing import TypedDict, Optional
-from langgraph.graph import StateGraph, END
-from langchain_groq import ChatGroq
+import time
+from typing import Optional, TypedDict
+
+
 from langchain_core.messages import HumanMessage
-from db.chroma_client import get_vectorstore
+from langchain_groq import ChatGroq
+from langgraph.graph import END, StateGraph
+from loguru import logger
+
 from config import settings
+from db.chroma_client import get_vectorstore
+from observability.langfuse_client import create_trace, flush_langfuse
 from rag.guardrails import validate_input, validate_output
 
  
@@ -63,6 +69,7 @@ MODE_CHAT = "chat"
 MODE_QA = "qa"
 MODE_CURATE = "curate"
 
+
 # ---------------------------------------------------------------------------
 # Dominios académicos de confianza para el filtro post-búsqueda
 # ---------------------------------------------------------------------------
@@ -81,12 +88,13 @@ TRUSTED_ACADEMIC_DOMAINS = [
 # ---------------------------------------------------------------------------
 class CurationSuggestion(TypedDict):
     """Estructura de una sugerencia académica generada por el agente."""
-    type: str            # "redundancy" | "conflict" | "complement" | "no_support"
-    description: str     # Explicación en lenguaje natural
-    action: str          # Acción recomendada al curador
-    severity: str        # "low" | "medium" | "high"
-    base_reference: str  # Fragmento del libro base relacionado (puede ser vacío)s
-    
+    type: str               # "redundancy" | "conflict" | "complement" | "no_support"
+    description: str        # Explicación en lenguaje natural
+    action: str             # Acción recomendada al curador
+    severity: str           # "low" | "medium" | "high"
+    base_reference: str     # Fragmento del libro base relacionado (puede ser vacío)s
+
+
 class RAGState(TypedDict):
     """Estado compartido entre nodos del grafo RAG."""
     question: str
@@ -104,9 +112,13 @@ class RAGState(TypedDict):
     used_web_fallback: bool          # Flag: se usó búsqueda web en esta consulta
     input_error: Optional[str]       # Error de guardrail detectado en retrieve (corta el flujo)
     conversation_history: list[dict] # Historial reciente [{sender, content}] para contexto conversacional
+    _trace_id: Optional[str]  # propaga el trace de Langfuse entre nodos
 
+
+# ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
 def _build_intent_classifier_prompt(question: str) -> str:
-
     return f"""
     Eres un clasificador de intención para un sistema RAG académico.
 
@@ -121,7 +133,7 @@ def _build_intent_classifier_prompt(question: str) -> str:
 
     - curate
     → solicitudes de análisis, comparación, revisión crítica,
-    detección de inconsistencias, evaluación o validación académica.
+    deteccion de inconsistencias, evaluacion o validacion academica.
 
     IMPORTANTE:
     - Responde SOLO con una palabra:
@@ -135,24 +147,25 @@ def _build_intent_classifier_prompt(question: str) -> str:
     """
 
 
-def detect_intent(question: str) -> str:
+# ---------------------------------------------------------------------------
+# Deteccion de intencion
+# ---------------------------------------------------------------------------
+def detect_intent(question: str, trace=None) -> str:
+    """Detecta la intencion con un LLM classifier.
+    Registra la llamada como Generation en Langfuse si hay trace activo.
     """
-    Detecta intención usando un LLM classifier.
-    """
-
+    t0 = time.monotonic()
     try:
-
         llm = ChatGroq(
             model=settings.GROQ_CLASSIFIER_MODEL,
             api_key=settings.GROQ_API_KEY,
             temperature=0,
         )
-
         prompt = _build_intent_classifier_prompt(question)
+        response = llm.invoke([HumanMessage(content=prompt)])
 
-        response = llm.invoke([
-            HumanMessage(content=prompt)
-        ])
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        usage = response.response_metadata.get("token_usage", {})
 
         intent = (
             response.content
@@ -167,20 +180,42 @@ def detect_intent(question: str) -> str:
             MODE_QA,
             MODE_CURATE,
         }
-
-        # fallback de seguridad
         if intent not in valid_modes:
-            return MODE_QA
+            intent = MODE_QA
+
+        logger.info(
+            "intent_detected",
+            intent=intent,
+            latency_ms=latency_ms,
+            tokens_in=usage.get("prompt_tokens", 0),
+            tokens_out=usage.get("completion_tokens", 0),
+        )
+
+        if trace:
+            try:
+                from langfuse.model import ModelUsage
+                trace.generation(
+                    name="llm_detect_intent",
+                    model=settings.GROQ_CLASSIFIER_MODEL,
+                    input=prompt,
+                    output=intent,
+                    usage=ModelUsage(
+                        input=usage.get("prompt_tokens", 0),
+                        output=usage.get("completion_tokens", 0),
+                    ),
+                    metadata={"latency_ms": latency_ms},
+                )
+            except Exception as lf_exc:
+                logger.warning("langfuse_generation_failed", node="detect_intent", error=str(lf_exc))
 
         return intent
 
     except Exception as e:
-
-        print(f"[intent-classifier] Error: {e}")
-
-        # fallback seguro
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        logger.error("intent_detection_error", error=str(e), latency_ms=latency_ms)
         return MODE_QA
- 
+
+
 # ---------------------------------------------------------------------------
 # Helpers de recuperación
 # ---------------------------------------------------------------------------
@@ -261,6 +296,7 @@ def _retrieve_by_type(question: str, document_type: str, k: int, user_id: int, t
         return chunks, avg_similarity
     except Exception as e:
         # No interrumpimos el flujo; el nodo caller decide qué hacer.
+        logger.warning("retrieve_warning", document_type=document_type, error=str(e))
         print(f"[retrieve] Advertencia al recuperar '{document_type}': {e}")
         return [], 0.0
     
@@ -272,7 +308,7 @@ def _retrieve_by_type(question: str, document_type: str, k: int, user_id: int, t
 def retrieve(state: RAGState) -> dict:
     """
     Nodo 1 — Recuperación con validación de guardrails al inicio.
- 
+
     Orden de ejecución:
     1. Valida el input con guardrails ANTES de tocar ChromaDB o internet.
        Si falla → setea input_error y retorna con mode=MODE_CHAT para ir
@@ -280,36 +316,18 @@ def retrieve(state: RAGState) -> dict:
     2. Detecta intención (chat / qa / curate).
     3. Recupera chunks de ChromaDB con MMR y calcula rag_similarity_score.
     """
-
+    t0 = time.monotonic()
     question = state["question"]
-    
+    avg_score = 0.0
+    base_chunks, user_chunks, mode = [], [], MODE_QA
+
     # ------------------------------------------------------------------
     # GUARDRAIL DE INPUT — primer filtro, antes de cualquier búsqueda
     # ------------------------------------------------------------------
     is_input_valid, _, input_error = validate_input(question)
- 
+
     if not is_input_valid:
-        print(f"[guardrails][retrieve] Input rechazado: {input_error}")
-        return {
-            "base_context": [],
-            "user_context": [],
-            "mode": MODE_CHAT,          # Fuerza flujo directo a generate
-            "suggestions": [],
-            "analysis_error": None,
-            "rag_similarity_score": 1.0,
-            "web_results": [],
-            "used_web_fallback": False,
-            "input_error": input_error,
-            "conversation_history": state.get("conversation_history", []),
-        }
-
-    # Detectar intención REAL
-    mode = detect_intent(question)
-
-    # ---------------------------------------------------
-    # CHAT → no hacer retrieval
-    # ---------------------------------------------------
-    if mode == MODE_CHAT:
+        logger.warning("guardrails_input_rejected", error=input_error)
         return {
             "base_context": [],
             "user_context": [],
@@ -319,38 +337,95 @@ def retrieve(state: RAGState) -> dict:
             "rag_similarity_score": 1.0,
             "web_results": [],
             "used_web_fallback": False,
-            "input_error": None,
+            "input_error": input_error,
             "conversation_history": state.get("conversation_history", []),
+            "_trace_id": None,
         }
 
-    # ---------------------------------------------------
-    # QA o CURATE → sí hacer retrieval
-    # ---------------------------------------------------
-    base_chunks, base_score = _retrieve_by_type(
-        question,
-        "base_knowledge",
-        settings.RETRIEVER_K,
-        user_id=state["user_id"],
-        target_files=state.get("base_files", [])
+    trace = create_trace(
+        name="rag_pipeline",
+        input={"question": question},
+        metadata={"question": question},
     )
+    trace_id = trace.id if trace else None
 
-    user_chunks, user_score = _retrieve_by_type(
-        question,
-        "user_upload",
-        settings.RETRIEVER_K,
-        user_id=state["user_id"],
-        target_files=state.get("user_files", [])
-    )
-    # Score final: promedio ponderado.
-    # Si no hay user_context usamos solo base_score.
-    if user_chunks:
-        avg_score = (base_score + user_score) / 2
-    else:
-        avg_score = base_score
- 
-    print(f"[retrieve] RAG similarity score: {avg_score:.3f} "
-          f"(umbral: {settings.WEB_SEARCH_SIMILARITY_THRESHOLD})")
-    
+    with logger.contextualize(trace_id=trace_id or "-"):
+        span = trace.span(name="retrieve", input={"question": question}) if trace else None
+
+        try:
+            mode = detect_intent(question, trace=trace)
+
+            # ---------------------------------------------------
+            # CHAT → no hacer retrieval
+            # ---------------------------------------------------
+            if mode == MODE_CHAT:
+                if span:
+                    span.end(output={"mode": MODE_CHAT})
+                return {
+                    "base_context": [],
+                    "user_context": [],
+                    "mode": MODE_CHAT,
+                    "suggestions": [],
+                    "analysis_error": None,
+                    "rag_similarity_score": 1.0,
+                    "web_results": [],
+                    "used_web_fallback": False,
+                    "input_error": None,
+                    "conversation_history": state.get("conversation_history", []),
+                    "_trace_id": trace_id,
+                }
+
+            # ---------------------------------------------------
+            # QA o CURATE → sí hacer retrieval
+            # ---------------------------------------------------
+            base_chunks, base_score = _retrieve_by_type(
+                question,
+                "base_knowledge",
+                settings.RETRIEVER_K,
+                user_id=state["user_id"],
+                target_files=state.get("base_files", [])
+            )
+
+            user_chunks, user_score = _retrieve_by_type(
+                question,
+                "user_upload",
+                settings.RETRIEVER_K,
+                user_id=state["user_id"],
+                target_files=state.get("user_files", [])
+            )
+
+            if user_chunks:
+                avg_score = (base_score + user_score) / 2
+            else:
+                avg_score = base_score
+
+            latency_ms = int((time.monotonic() - t0) * 1000)
+
+            print(f"[retrieve] RAG similarity score: {avg_score:.3f} "
+                  f"(umbral: {settings.WEB_SEARCH_SIMILARITY_THRESHOLD})")
+
+            logger.info(
+                "retrieve_ok",
+                mode=mode,
+                base_chunks=len(base_chunks),
+                user_chunks=len(user_chunks),
+                latency_ms=latency_ms,
+            )
+
+            if span:
+                span.end(output={
+                    "mode": mode,
+                    "base_chunks_count": len(base_chunks),
+                    "user_chunks_count": len(user_chunks),
+                    "rag_similarity_score": avg_score,
+                    "latency_ms": latency_ms,
+                })
+
+        except Exception as exc:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            logger.error("retrieve_error", error=str(exc), latency_ms=latency_ms)
+            if span:
+                span.end(level="ERROR", status_message=str(exc))
 
     return {
         "base_context": base_chunks,
@@ -363,7 +438,9 @@ def retrieve(state: RAGState) -> dict:
         "used_web_fallback": False,
         "input_error": None,
         "conversation_history": state.get("conversation_history", []),
+        "_trace_id": trace_id,
     }
+
 
 # ---------------------------------------------------------------------------
 # Nodo 2 — Web Search Fallback
@@ -468,24 +545,24 @@ def _build_analysis_prompt(question: str, base_context: list[str], user_context:
     """
     base_text = "\n\n---\n\n".join(base_context) if base_context else "Sin contenido de libros base disponible."
     user_text = "\n\n---\n\n".join(user_context)
- 
+
     return f"""Eres un curador académico experto. Tu tarea es analizar un documento subido por un estudiante
     y compararlo con el contenido oficial de los libros base del curso.
- 
+
     Debes identificar:
     1. REDUNDANCIA: El documento repite contenido que ya existe en los libros base.
-    2. CONFLICTO: El documento contradice o es inconsistente con los libros base (esto es lo más importante).
+    2. CONFLICTO: El documento contradice o es inconsistente con los libros base (esto es lo mas importante).
     3. COMPLEMENTO: El documento agrega información útil que no está en los libros base.
     4. SIN_RESPALDO: El documento contiene afirmaciones que no tienen respaldo en los libros base.
- 
+
     Tema consultado: {question}
- 
+
     === CONTENIDO DE LIBROS BASE ===
     {base_text}
- 
-    ===CONTENIDO DEL DOCUMENTO DEL USUARIO ===
+
+    === CONTENIDO DEL DOCUMENTO DEL USUARIO ===
     {user_text}
- 
+
     Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto adicional, sin markdown:
     {{
     "suggestions": [
@@ -498,9 +575,11 @@ def _build_analysis_prompt(question: str, base_context: list[str], user_context:
         }}
     ]
     }}
-    
+
     Si no encuentras ningún problema ni sugerencia relevante, retorna {{"suggestions": []}}.
     """
+
+
 def analyze(state: RAGState) -> dict:
     """
     Nodo 3 — Análisis de inconsistencias (solo en modo curate).
@@ -516,66 +595,106 @@ def analyze(state: RAGState) -> dict:
     # Validación: si no hay contexto del usuario, no hay nada que analizar.
     if not state.get("user_context"):
         return {"suggestions": [], "analysis_error": None}
- 
+
     # Validación: advertir si no hay libros base (el análisis será limitado).
     if not state.get("base_context"):
         print("[analyze] Advertencia: No hay contenido de libros base para comparar.")
- 
+        logger.warning("analyze_no_base_context")
+
+    t0 = time.monotonic()
+    trace_id = state.get("_trace_id")
+
+    trace = None
     try:
-        prompt = _build_analysis_prompt(
-            question=state["question"],
-            base_context=state["base_context"],
-            user_context=state["user_context"],
-        )
- 
-        llm = ChatGroq(
-            model=settings.GROQ_MODEL,
-            api_key=settings.GROQ_API_KEY,
-            temperature=0,  # Determinismo total para análisis consistente
-        )
- 
-        response = llm.invoke([HumanMessage(content=prompt)])
-        raw_content = response.content.strip()
- 
-        # Limpiar posibles backticks de markdown que el LLM pueda agregar
-        if raw_content.startswith("```"):
-            lines = raw_content.split("\n")
-            raw_content = "\n".join(lines[1:-1])
- 
-        parsed = json.loads(raw_content)
-        suggestions = parsed.get("suggestions", [])
- 
-        # Validar estructura de cada sugerencia
-        validated_suggestions = []
-        for s in suggestions:
-            if not isinstance(s, dict):
-                continue
-            validated_suggestions.append({
-                "type": s.get("type", "no_support"),
-                "description": s.get("description", "Sin descripción"),
-                "action": s.get("action", "Revisar manualmente"),
-                "severity": s.get("severity", "medium"),
-                "base_reference": s.get("base_reference", ""),
-            })
- 
-        return {"suggestions": validated_suggestions, "analysis_error": None}
- 
-    except json.JSONDecodeError as e:
+        from observability.langfuse_client import get_langfuse_client
+        lf = get_langfuse_client()
+        if lf and trace_id:
+            trace = lf.trace(id=trace_id)
+    except Exception:
+        pass
+
+    span = trace.span(name="analyze", input={"question": state["question"]}) if trace else None
+
+    with logger.contextualize(trace_id=trace_id or "-"):
+        try:
+            prompt = _build_analysis_prompt(
+                question=state["question"],
+                base_context=state["base_context"],
+                user_context=state["user_context"],
+            )
+            llm = ChatGroq(model=settings.GROQ_MODEL, api_key=settings.GROQ_API_KEY, temperature=0)
+            response = llm.invoke([HumanMessage(content=prompt)])
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            usage = response.response_metadata.get("token_usage", {})
+
+            raw_content = response.content.strip()
+            if raw_content.startswith("```"):
+                lines = raw_content.split("\n")
+                raw_content = "\n".join(lines[1:-1])
+
+            parsed = json.loads(raw_content)
+            
+            suggestions = parsed.get("suggestions", [])
+            # Validar estructura de cada sugerencia
+            validated_suggestions = []
+            for s in suggestions:
+                if not isinstance(s, dict):
+                    continue
+                validated_suggestions.append({
+                    "type": s.get("type", "no_support"),
+                    "description": s.get("description", "Sin descripción"),
+                    "action": s.get("action", "Revisar manualmente"),
+                    "severity": s.get("severity", "medium"),
+                    "base_reference": s.get("base_reference", ""),
+                })
+            
+            logger.info(
+                "analyze_ok",
+                suggestions_count=len(validated_suggestions),
+                latency_ms=latency_ms,
+                tokens_in=usage.get("prompt_tokens", 0),
+                tokens_out=usage.get("completion_tokens", 0),
+            )
+
+            if trace:
+                try:
+                    from langfuse.model import ModelUsage
+                    trace.generation(
+                        name="llm_analyze",
+                        model=settings.GROQ_MODEL,
+                        input=prompt,
+                        output=raw_content,
+                        usage=ModelUsage(
+                            input=usage.get("prompt_tokens", 0),
+                            output=usage.get("completion_tokens", 0),
+                        ),
+                        metadata={"latency_ms": latency_ms, "suggestions_count": len(validated_suggestions)},
+                    )
+                except Exception as lf_exc:
+                    logger.warning("langfuse_generation_failed", node="analyze", error=str(lf_exc))
+
+            if span:
+                span.end(output={"suggestions_count": len(validated_suggestions), "latency_ms": latency_ms})
+
+            return {"suggestions": validated_suggestions, "analysis_error": None}
+
+        except json.JSONDecodeError as e:
         # El LLM no retornó JSON válido; registramos el error pero seguimos.
-        error_msg = f"Error al parsear respuesta del análisis: {e}"
-        print(f"[analyze] {error_msg}")
-        return {
-            "suggestions": [],
-            "analysis_error": error_msg,
-        }
-    except Exception as e:
-        # Error inesperado (LLM no disponible, timeout, etc.)
-        error_msg = f"Error inesperado durante el análisis: {e}"
-        print(f"[analyze] {error_msg}")
-        return {
-            "suggestions": [],
-            "analysis_error": error_msg,
-        }
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            error_msg = f"Error al parsear respuesta del analisis: {e}"
+            logger.error("analyze_json_error", error=error_msg, latency_ms=latency_ms)
+            if span:
+                span.end(level="ERROR", status_message=error_msg)
+            return {"suggestions": [], "analysis_error": error_msg}
+
+        except Exception as e:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            error_msg = f"Error inesperado durante el analisis: {e}"
+            logger.error("analyze_error", error=error_msg, latency_ms=latency_ms)
+            if span:
+                span.end(level="ERROR", status_message=error_msg)
+            return {"suggestions": [], "analysis_error": error_msg}
+
 
 # ---------------------------------------------------------------------------
 # Nodo 4 — Generación de respuesta final
@@ -896,7 +1015,7 @@ def _build_curate_prompt(
 
         El usuario hizo esta solicitud: "{question}"
 
-        Analiza si es una solicitud CONVERSACIONAL (mejoras, consejos, qué le falta) o FORMAL (reporte, análisis completo, inconsistencias).
+        Analiza si es una solicitud CONVERSACIONAL (mejoras, consejos, qué le falta) o FORMAL (reporte, analisis completo, inconsistencias).
 
         Si es CONVERSACIONAL:
         - Responde de forma directa y natural, como si fuera una conversación.
@@ -937,7 +1056,6 @@ def _build_curate_prompt(
         Respuesta:"""
 
 
-
 def generate(state: RAGState) -> dict:
     """
     Nodo 4 — Generación final con guardrails.
@@ -948,113 +1066,160 @@ def generate(state: RAGState) -> dict:
     Incorpora snippets web en el prompt cuando used_web_fallback=True,
     indicando la procedencia de cada fragmento.
     """
+    logger.info("generate_trace_id", trace_id=state.get("_trace_id"))
+    t0 = time.monotonic()
+    trace_id = state.get("_trace_id")
 
+    trace = None
     try:
-        
-        # ------------------------------------------------------------------
-        # GUARDRAIL DE INPUT — si retrieve ya lo rechazó, responder directo
-        # ------------------------------------------------------------------
-        input_error = state.get("input_error")
-        if input_error:
-            print(f"[guardrails][generate] Respondiendo con error de input: {input_error}")
-            return {"answer": f"Tu mensaje no pudo ser procesado: {input_error}"}
-        
-        # ---------------------------------------------------
-        # Validación de seguridad (por si generate se llama directo en tests)
-        # ---------------------------------------------------
-        is_input_valid, validated_question, val_error = validate_input(state["question"])
-        if not is_input_valid:
-            error_answer = f"Tu mensaje no pudo ser procesado: {val_error}"
-            print(f"[guardrails][generate] Input rechazado en segunda validación: {val_error}")
-            return {"answer": error_answer}
-        
-        web_results = state.get("web_results", [])
-        used_web_fallback = state.get("used_web_fallback", False)
+        from observability.langfuse_client import get_langfuse_client
+        lf = get_langfuse_client()
+        if lf and trace_id:
+            trace = lf.trace(id=trace_id)
+    except Exception:
+        pass
 
-        # ---------------------------------------------------
-        # CHAT
-        # ---------------------------------------------------
-        if state["mode"] == MODE_CHAT:
+    with logger.contextualize(trace_id=trace_id or "-"):
+        try:
+            # ---------------------------------------------------
+            # Guardrail de input — si retrieve ya lo rechazó
+            # ---------------------------------------------------
+            input_error = state.get("input_error")
+            if input_error:
+                logger.warning("generate_input_error_passthrough", error=input_error)
+                return {"answer": f"Tu mensaje no pudo ser procesado: {input_error}"}
 
-            conversation_section = ""
-            if state.get("conversation_history"):
-                conv_context = _build_conversation_context_chat(state["conversation_history"])
-                if conv_context:
-                    conversation_section = f"\n{conv_context}\n"
+            # ---------------------------------------------------
+            # Validación de seguridad secundaria
+            # ---------------------------------------------------
+            is_input_valid, validated_question, val_error = validate_input(state["question"])
+            if not is_input_valid:
+                error_answer = f"Tu mensaje no pudo ser procesado: {val_error}"
+                logger.warning("guardrails_input_rejected_generate", error=val_error)
+                return {"answer": error_answer}
 
-            prompt = f"""
-Eres un asistente conversacional amigable.
-{conversation_section}
-Responde naturalmente al usuario.
+            web_results = state.get("web_results", [])
+            used_web_fallback = state.get("used_web_fallback", False)
+            mode = state["mode"]
 
-Mensaje:
-{validated_question}
-"""
+            # ---------------------------------------------------
+            # CHAT
+            # ---------------------------------------------------
+            if mode == MODE_CHAT:
+                conversation_section = ""
+                if state.get("conversation_history"):
+                    conv_context = _build_conversation_context_chat(state["conversation_history"])
+                    if conv_context:
+                        conversation_section = f"\n{conv_context}\n"
 
-        # ---------------------------------------------------
-        # CURATE
-        # ---------------------------------------------------
-        elif state["mode"] == MODE_CURATE:
+                prompt = f"""
+    Eres un asistente conversacional amigable.
+    {conversation_section}
+    Responde naturalmente al usuario.
 
-            prompt = _build_curate_prompt(
-                question=validated_question,
-                base_context=state["base_context"],
-                user_context=state["user_context"],
-                suggestions=state.get("suggestions", []),
-                analysis_error=state.get("analysis_error"),
-                web_results=web_results,
-                used_web_fallback=used_web_fallback,
+    Mensaje:
+    {validated_question}
+    """
+
+            # ---------------------------------------------------
+            # CURATE
+            # ---------------------------------------------------
+            elif mode == MODE_CURATE:
+                prompt = _build_curate_prompt(
+                    question=validated_question,
+                    base_context=state["base_context"],
+                    user_context=state["user_context"],
+                    suggestions=state.get("suggestions", []),
+                    analysis_error=state.get("analysis_error"),
+                    web_results=web_results,
+                    used_web_fallback=used_web_fallback,
+                )
+
+            # ---------------------------------------------------
+            # QA
+            # ---------------------------------------------------
+            else:
+                prompt = _build_qa_prompt(
+                    question=validated_question,
+                    base_context=state["base_context"],
+                    user_context=state["user_context"],
+                    web_results=web_results,
+                    used_web_fallback=used_web_fallback,
+                    rag_similarity_score=state.get("rag_similarity_score", 0.0),
+                    conversation_history=state.get("conversation_history"),
+                )
+
+            llm = ChatGroq(
+                model=settings.GROQ_MODEL,
+                api_key=settings.GROQ_API_KEY,
+                temperature=0,
             )
 
-        # ---------------------------------------------------
-        # QA
-        # ---------------------------------------------------
-        else:
+            response = llm.invoke([
+                HumanMessage(content=prompt)
+                ])
+            
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            usage = response.response_metadata.get("token_usage", {})
 
-            prompt = _build_qa_prompt(
-                question=validated_question,
-                base_context=state["base_context"],
-                user_context=state["user_context"],
-                web_results=web_results,
-                used_web_fallback=used_web_fallback,
-                rag_similarity_score=state.get("rag_similarity_score", 0.0),
-                conversation_history=state.get("conversation_history"),
+            # ---------------------------------------------------
+            # Validar output con guardrails
+            # ---------------------------------------------------
+            is_output_valid, validated_answer, output_error = validate_output(response.content)
+
+            if not is_output_valid:
+                error_answer = f"La respuesta generada no pasó la validación: {output_error}\nPor favor reformula tu pregunta."
+                logger.warning("guardrails_output_rejected", error=output_error, latency_ms=latency_ms)
+                if trace:
+                    try:
+                        trace.update(level="ERROR", status_message=f"guardrail: {output_error}")
+                    except Exception:
+                        pass
+                flush_langfuse()
+                return {"answer": error_answer}
+
+            logger.info(
+                "generate_ok",
+                mode=mode,
+                latency_ms=latency_ms,
+                tokens_in=usage.get("prompt_tokens", 0),
+                tokens_out=usage.get("completion_tokens", 0),
             )
 
-        llm = ChatGroq(
-            model=settings.GROQ_MODEL,
-            api_key=settings.GROQ_API_KEY,
-            temperature=0,
-        )
+            if trace:
+                try:
+                    from langfuse.model import ModelUsage
+                    trace.generation(
+                        name="llm_generate",
+                        model=settings.GROQ_MODEL,
+                        input=prompt,
+                        output=validated_answer,
+                        usage=ModelUsage(
+                            input=usage.get("prompt_tokens", 0),
+                            output=usage.get("completion_tokens", 0),
+                        ),
+                        metadata={"latency_ms": latency_ms, "mode": mode},
+                    )
+                    trace.update(
+                        output={"answer": validated_answer},
+                        metadata={"total_latency_ms": latency_ms, "mode": mode},
+                    )
+                except Exception as lf_exc:
+                    logger.warning("langfuse_generation_failed", node="generate", error=str(lf_exc))
 
-        response = llm.invoke([
-            HumanMessage(content=prompt)
-        ])
+            flush_langfuse()
+            return {"answer": validated_answer}
 
-        # ---------------------------------------------------
-        # Validar output con guardrails
-        # ---------------------------------------------------
-        is_output_valid, validated_answer, output_error = validate_output(response.content)
-        
-        if not is_output_valid:
-            error_answer = f"La respuesta generada no pasó la validación: {output_error}\nPor favor reformula tu pregunta."
-            print(f"[guardrails] Output rechazado: {output_error}")
-            return {"answer": error_answer}
-
-        return {"answer": validated_answer}
-
-    except Exception as e:
-
-        error_answer = (
-            f"Error al generar la respuesta: {e}\n"
-            "Por favor intenta nuevamente."
-        )
-
-        print(f"[generate] Error crítico: {e}")
-
-        return {"answer": error_answer}
-    
-
+        except Exception as exc:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            logger.error("generate_error", error=str(exc), latency_ms=latency_ms)
+            if trace:
+                try:
+                    trace.update(level="ERROR", status_message=str(exc))
+                except Exception:
+                    pass
+            flush_langfuse()
+            return {"answer": f"Error al generar la respuesta: {exc}\nPor favor intenta nuevamente."}
 # ---------------------------------------------------------------------------
 # Router: decide si se ejecuta analyze o no
 # ---------------------------------------------------------------------------
@@ -1123,14 +1288,12 @@ def build_rag_graph():
     en ChromaDB, y el router decide si pasar por analyze o ir directo a generate.
     """
     graph = StateGraph(RAGState)
- 
+
     graph.add_node("retrieve", retrieve)
     graph.add_node("web_search", web_search)
     graph.add_node("analyze", analyze)
     graph.add_node("generate", generate)
- 
     graph.set_entry_point("retrieve")
- 
     # Routing condicional después de retrieve
     graph.add_conditional_edges(
         "retrieve",
@@ -1149,12 +1312,11 @@ def build_rag_graph():
             "generate": "generate",
         },
     )
- 
+
     graph.add_edge("analyze", "generate")
     graph.add_edge("generate", END)
- 
+
     return graph.compile()
 
 
-# Se compila una sola vez al importar el modulo para reducir overhead por request.
 rag_chain = build_rag_graph()
