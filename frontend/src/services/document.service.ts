@@ -36,7 +36,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export async function apiGetUserDocuments(token: string): Promise<DocumentResponse[]> {
-  const res = await fetch(`${API_BASE_URL}/documents/`, {
+  const res = await fetch(`${API_BASE_URL}/documents`, {
     headers: authHeaders(token),
   });
   return handleResponse<DocumentResponse[]>(res);

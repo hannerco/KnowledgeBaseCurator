@@ -6,7 +6,11 @@ from config import settings
 
 DATABASE_URL = settings.DATABASE_URL
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(DATABASE_URL,
+    pool_pre_ping=True,        # verifica la conexión antes de usarla
+    pool_recycle=300,          # recicla conexiones cada 5 minutos
+    pool_size=5,
+    max_overflow=2)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

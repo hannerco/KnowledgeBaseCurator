@@ -21,7 +21,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://knowledgefront-production.up.railway.app",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://localhost:8080",
+        "*"    # para desarrollo local
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
