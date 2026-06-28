@@ -47,9 +47,30 @@ export default function Home() {
 
       <main className="flex-1 max-w-7xl mx-auto w-full px-5 md:px-10 pt-8 md:pt-8 pb-5 md:pb-14 flex flex-col md:flex-row items-center gap-10 md:gap-16">
         <div className="flex-1 flex flex-col gap-5 md:gap-6 text-center md:text-left items-center md:items-start">
-          <span className="inline-flex items-center w-fit gap-2 bg-indigo-100 text-indigo-700 text-xs font-semibold tracking-widest uppercase px-4 py-2 rounded-full border border-indigo-200">
-            The Digital Atelier
-          </span>
+          <a
+            href="https://www.softserveinc.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group inline-flex bg-white w-full max-w-xs items-center justify-between gap-4 rounded-2xl border border-white/80 bg-white/90 px-4 py-3 text-left shadow-lg shadow-blue-950/10 ring-1 ring-blue-100/80 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-950/15 sm:w-auto sm:max-w-none"
+            title="Visitar SoftServe"
+          >
+            <span className="flex items-center gap-3">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-gray-950 shadow-md shadow-blue-950/20 transition-transform duration-200 group-hover:scale-105">
+                <SoftServeLogo size={34} className="rounded-lg" />
+              </span>
+              <span className="flex flex-col">
+                <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-900">
+                  En colaboraci&oacute;n con
+                </span>
+                <span className="text-lg font-extrabold leading-tight text-blue-950">
+                  SoftServe
+                </span>
+              </span>
+            </span>
+            <span className="hidden rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 sm:inline-flex">
+              Patrocinador oficial
+            </span>
+          </a>
           <h1 className="text-4xl sm:text-5xl md:text-5xl font-extrabold text-blue-950 leading-[1.08] tracking-tight">
             Ayuda para el<br />
             pensamiento y la<br />

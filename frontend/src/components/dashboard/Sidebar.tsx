@@ -17,6 +17,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { LogoutModal } from "./LogoutModal";
 import { useState, useRef, useEffect } from "react";
 import { apiDeleteChat, apiUpdateChat } from "@/src/services/chat.service";
+import { SoftServeLogo } from "../ui/SoftServeLogo";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -389,7 +390,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
           )}
         </div>
 
-        {/*<div className={`pb-4 pt-3 border-t border-gray-100 ${collapsed ? "flex justify-center px-2" : "px-3"}`}>
+        <div className={`pb-4 pt-3 border-t border-gray-100 ${collapsed ? "flex justify-center px-2" : "px-3"}`}>
           {collapsed ? (
             <a
               href="https://www.softserveinc.com/"
@@ -415,7 +416,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
               </div>
             </a>
           )}
-        </div>*/}
+        </div>
 
       </div>
 
