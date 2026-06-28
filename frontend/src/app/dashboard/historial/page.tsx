@@ -94,21 +94,7 @@ export default function HistorialPage() {
                   className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-transparent"
                 />
               </div>
-              <div className="flex bg-white border border-gray-200 rounded-xl overflow-hidden text-sm font-medium shrink-0">
-                {(["todo", "chats"] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className={`flex-1 sm:flex-initial px-4 py-2.5 transition-colors capitalize ${
-                      filter === f
-                        ? "bg-[#1a2b4a] text-white"
-                        : "text-gray-500 hover:bg-gray-50"
-                    }`}
-                  >
-                    {f === "todo" ? "Todo" : "Chats"}
-                  </button>
-                ))}
-              </div>
+              
             </div>
 
             {loading ? (
